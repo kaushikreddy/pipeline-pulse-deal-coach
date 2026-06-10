@@ -1,9 +1,12 @@
 import {
+  coachingQueue,
   enrichOpportunities,
   filterByOwner,
+  summarizeDealCoaching,
   summarizeOwners,
   summarizePipeline
 } from "./crm.js";
+import { sampleCrmData } from "./sample-data.js";
 
 const state = {
   crm: null,
@@ -18,21 +21,32 @@ const elements = {
   metricOpen: document.querySelector("#metric-open"),
   metricWeighted: document.querySelector("#metric-weighted"),
   metricCritical: document.querySelector("#metric-critical"),
-  metricOverdue: document.querySelector("#metric-overdue")
+  metricOverdue: document.querySelector("#metric-overdue"),
+  coachSummary: document.querySelector("#coach-summary")
 };
 
 async function loadCrm() {
-  const response = await fetchCrmData();
-  state.crm = await response.json();
+  state.crm = await fetchCrmData();
   populateOwnerFilter(state.crm);
   render();
 }
 
 async function fetchCrmData() {
-  const response = await fetch("/api/crm");
-  if (response.ok) return response;
+  try {
+    const apiResponse = await fetch("/api/crm");
+    if (apiResponse.ok) return apiResponse.json();
+  } catch {
+    // The app may be opened directly as file:// during judging.
+  }
 
-  return fetch("data/crm.json");
+  try {
+    const staticResponse = await fetch("data/crm.json");
+    if (staticResponse.ok) return staticResponse.json();
+  } catch {
+    // Fall through to embedded demo data for local-file previews.
+  }
+
+  return sampleCrmData;
 }
 
 function populateOwnerFilter(data) {
@@ -49,6 +63,8 @@ function populateOwnerFilter(data) {
 function render() {
   const opportunities = filterByOwner(enrichOpportunities(state.crm), state.owner);
   const metrics = summarizePipeline(state.crm, state.owner);
+  const coaching = summarizeDealCoaching(state.crm, state.owner);
+  const queue = coachingQueue(state.crm, state.owner);
 
   elements.metricOpen.textContent = `$${formatCompact(metrics.openPipeline)}`;
   elements.metricWeighted.textContent = `$${formatCompact(metrics.weightedPipeline)}`;
@@ -57,7 +73,50 @@ function render() {
   elements.resultCount.textContent = `${opportunities.length} deal${opportunities.length === 1 ? "" : "s"}`;
 
   renderAccounts(state.crm.accounts, state.owner);
+  renderCoachSummary(coaching, queue);
   renderOpportunities(opportunities);
+}
+
+function renderCoachSummary(coaching, queue) {
+  elements.coachSummary.innerHTML = `
+    <div class="coach-summary-top">
+      <div>
+        <span>Team Lead Deal Coach</span>
+        <strong>${coaching.coachedDeals} deal${coaching.coachedDeals === 1 ? "" : "s"} need manager attention</strong>
+        <p>${coaching.topDealName ? `Prioritized coaching queue for sales leads: start with ${coaching.topOwner} on ${coaching.topDealName}. ${coaching.topSuggestion}` : coaching.topSuggestion}</p>
+      </div>
+      <div class="coach-metrics" aria-label="Deal Coach metrics">
+        <p><strong>$${formatCompact(coaching.pipelineAtRisk)}</strong><span>pipeline at risk</span></p>
+        <p><strong>${coaching.urgentActions}</strong><span>urgent asks</span></p>
+      </div>
+    </div>
+    <div class="coach-queue">
+      ${queue.length === 0 ? "<p>No coaching queue for this owner.</p>" : queue.map(renderCoachQueueItem).join("")}
+    </div>
+  `;
+}
+
+function renderCoachQueueItem(deal) {
+  return `
+    <article class="coach-queue-item">
+      <div>
+        <span class="priority priority-${deal.suggestions[0].priority}">${deal.coachingFocus}</span>
+        <h3>${deal.name}</h3>
+        <p>${deal.account.owner} · $${formatCompact(deal.amount)} · ${deal.stage} · risk ${deal.riskScore}</p>
+      </div>
+      <div>
+        <strong>Manager play</strong>
+        <p>${deal.managerPlay}</p>
+      </div>
+      <div>
+        <strong>Rep ask</strong>
+        <p>${deal.repAsk}</p>
+      </div>
+      <div class="risk-drivers">
+        ${deal.riskDrivers.map((driver) => `<span>${driver}</span>`).join("")}
+      </div>
+    </article>
+  `;
 }
 
 function renderAccounts(accounts, owner) {
@@ -101,12 +160,41 @@ function renderOpportunities(opportunities) {
           <span>${opportunity.forecastCategory}</span>
           <span>${opportunity.probability}% probability</span>
           <span>${opportunity.lastActivityDays} days since activity</span>
-          <span>${opportunity.contactCoverage} contacts</span>
+          <span>${opportunity.contactCoverage} contact${opportunity.contactCoverage === 1 ? "" : "s"}</span>
         </div>
+        ${renderSuggestions(opportunity.suggestions)}
       `;
       return card;
     })
   );
+}
+
+function renderSuggestions(suggestions) {
+  if (suggestions.length === 0) return "";
+
+  return `
+    <section class="coach-actions" aria-label="Deal Coach suggestions">
+      <div class="coach-actions-heading">
+        <span>Rep coaching prompts</span>
+        <strong>${suggestions.length} action${suggestions.length === 1 ? "" : "s"}</strong>
+      </div>
+      <ol>
+        ${suggestions
+          .map(
+            (suggestion) => `
+              <li>
+                <span class="priority priority-${suggestion.priority}">${suggestion.priority}</span>
+                <div>
+                  <strong>${suggestion.title}</strong>
+                  <p>${suggestion.detail}</p>
+                </div>
+              </li>
+            `
+          )
+          .join("")}
+      </ol>
+    </section>
+  `;
 }
 
 function formatCompact(value) {

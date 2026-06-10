@@ -3,11 +3,14 @@ import { describe, it } from "node:test";
 
 import {
   accountSnapshot,
+  coachingQueue,
   enrichOpportunities,
   filterByOwner,
   forecastCategory,
   riskLabel,
   scoreDealRisk,
+  suggestDealActions,
+  summarizeDealCoaching,
   summarizeOwners,
   summarizePipeline
 } from "../src/crm.js";
@@ -101,13 +104,14 @@ describe("scoreDealRisk", () => {
 });
 
 describe("enrichOpportunities", () => {
-  it("adds account, weighted amount, risk, and forecast details", () => {
+  it("adds account, weighted amount, risk, forecast, and coaching details", () => {
     const opportunities = enrichOpportunities(data);
 
     assert.equal(opportunities[0].id, "opp-a");
     assert.equal(opportunities[0].account.name, "Enterprise Co");
     assert.equal(opportunities[0].weightedAmount, 60000);
     assert.equal(opportunities[0].forecastCategory, "At Risk");
+    assert.equal(opportunities[0].suggestions.length, 3);
   });
 });
 
@@ -137,6 +141,38 @@ describe("summarizePipeline", () => {
   });
 });
 
+describe("deal coaching", () => {
+  it("suggests prioritized recovery actions for risky deals", () => {
+    const suggestions = suggestDealActions(data, data.opportunities[0], data.accounts[0]);
+
+    assert.deepEqual(
+      suggestions.map((suggestion) => suggestion.title),
+      ["Restart momentum", "Capture a concrete next step", "Expand stakeholder coverage"]
+    );
+    assert.equal(suggestions[0].priority, "urgent");
+  });
+
+  it("summarizes owner-specific coaching work", () => {
+    const summary = summarizeDealCoaching(data, "Maya Chen");
+
+    assert.equal(summary.coachedDeals, 1);
+    assert.equal(summary.urgentActions, 2);
+    assert.equal(summary.pipelineAtRisk, 150000);
+    assert.equal(summary.topDealName, "Expansion");
+    assert.equal(summary.topOwner, "Maya Chen");
+    assert.equal(summary.topSuggestion, "Coach Maya Chen on multi-threading before the next buyer meeting.");
+  });
+
+  it("builds a manager coaching queue with rep asks and risk drivers", () => {
+    const queue = coachingQueue(data, "Maya Chen");
+
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].coachingFocus, "Stakeholder coverage");
+    assert.equal(queue[0].repAsk, "Name the economic buyer, champion, and missing stakeholder.");
+    assert.ok(queue[0].riskDrivers.includes("single-threaded"));
+  });
+});
+
 describe("owner and account helpers", () => {
   it("lists owners alphabetically", () => {
     assert.deepEqual(summarizeOwners(data), ["Jordan Lee", "Maya Chen"]);
@@ -160,4 +196,3 @@ describe("owner and account helpers", () => {
     assert.equal(snapshot.activities.length, 1);
   });
 });
-
